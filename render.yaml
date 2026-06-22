@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: chit-fund-api
+    runtime: node
+    rootDir: src/server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: CLIENT_ORIGIN
+        value: https://rageshvarma99.github.io
+      - key: UPLOADS_DIR
+        value: ./uploads

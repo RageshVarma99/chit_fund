@@ -41,12 +41,13 @@ https://RageshVarma99.github.io/chit_fund/
 
 Create a MongoDB Atlas database and copy its connection string.
 
-Deploy `src/server` on Render:
+Deploy `src/server` on Render as a Web Service:
 
 ```text
 Root Directory: src/server
 Build Command: npm install
 Start Command: npm start
+Health Check Path: /health
 ```
 
 Set Render environment variables:
@@ -56,6 +57,8 @@ MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/chitfund
 CLIENT_ORIGIN=https://RageshVarma99.github.io
 UPLOADS_DIR=./uploads
 ```
+
+This repository also includes `render.yaml`, so Render can detect the backend service as a Blueprint. You still need to provide the `MONGODB_URI` value in Render.
 
 ## 5. Connect Frontend to Backend
 

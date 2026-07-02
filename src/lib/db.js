@@ -2,6 +2,36 @@
 
 export const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+// ---------- AUTH ----------
+
+export const loginUser = async (username, password) => {
+  const res = await fetch(`${API}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) { const t = await res.json(); throw new Error(t.error || "Login failed"); }
+  return res.json();
+};
+
+// ---------- OPERATOR USERS ----------
+
+export const getUsers = async () => { const r = await fetch(`${API}/users`); return r.json(); };
+
+export const addUser = async (data) => {
+  const r = await fetch(`${API}/users`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  if (!r.ok) { const t = await r.json(); throw new Error(t.error || "Failed"); }
+  return r.json();
+};
+
+export const updateUserApi = async (id, data) => {
+  const r = await fetch(`${API}/users/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  if (!r.ok) { const t = await r.json(); throw new Error(t.error || "Failed"); }
+  return r.json();
+};
+
+export const deleteUserApi = async (id) => { await fetch(`${API}/users/${id}`, { method: "DELETE" }); };
+
 // ---------- CLIENTS ----------
 
 export const getClients = async () => {
@@ -71,6 +101,31 @@ export const updateGroupMembers = async (id, memberIds) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ memberIds })
   });
+  return res.json();
+};
+
+export const uploadGroupClientDocs = async (groupId, clientId, formData) => {
+  formData.append("clientId", clientId);
+  const res = await fetch(`${API}/groups/${groupId}/client-documents`, { method: "POST", body: formData });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Server ${res.status}: ${t}`); }
+  return res.json();
+};
+
+export const deleteGroupClientDoc = async (groupId, docId) => {
+  const res = await fetch(`${API}/groups/${groupId}/client-documents/${docId}`, { method: "DELETE" });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Server ${res.status}: ${t}`); }
+  return res.json();
+};
+
+export const uploadGroupDocs = async (groupId, formData) => {
+  const res = await fetch(`${API}/groups/${groupId}/documents`, { method: "POST", body: formData });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Server ${res.status}: ${t}`); }
+  return res.json();
+};
+
+export const deleteGroupDoc = async (groupId, docId) => {
+  const res = await fetch(`${API}/groups/${groupId}/documents/${docId}`, { method: "DELETE" });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Server ${res.status}: ${t}`); }
   return res.json();
 };
 

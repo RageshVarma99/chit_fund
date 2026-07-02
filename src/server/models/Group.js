@@ -9,10 +9,20 @@ const groupSchema = new mongoose.Schema({
   startYear: Number,
   memberIds: [String],
   adminFeeAmount: { type: Number, default: 0 },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  psoNo: String,
+  commNo: String,
+  clientDocs: [{
+    clientId: String,
+    name: String,
+    filename: String,
+    uploadedAt: { type: Date, default: Date.now },
+  }],
+  groupDocs: [{
+    name: String,
+    filename: String,
+    uploadedAt: { type: Date, default: Date.now },
+  }],
+  createdAt: { type: Date, default: Date.now },
 });
 
 export default mongoose.model("Group", groupSchema);

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import LOGO_B64 from "./logoBase64.js";
+import SIGN_B64 from "./signBase64.js";
 import {
   Card,
   CardContent,
@@ -50,6 +51,10 @@ import {
   AlertCircle,
   X,
   GripVertical,
+  ChevronLeft,
+  ChevronRight,
+  TrendingUp,
+  ArrowRight,
 } from "lucide-react";
 import {
   getClients,
@@ -61,6 +66,10 @@ import {
   updateGroup,
   deleteGroup,
   updateGroupMembers,
+  uploadGroupClientDocs,
+  deleteGroupClientDoc,
+  uploadGroupDocs,
+  deleteGroupDoc,
   getPayments,
   addPayment as addPaymentApi,
   updatePayment as updatePaymentApi,
@@ -70,6 +79,11 @@ import {
   deleteInstallment as deleteInstallmentApi,
   uploadInstallmentDocs,
   deleteInstallmentDoc,
+  loginUser,
+  getUsers,
+  addUser,
+  updateUserApi,
+  deleteUserApi,
   API,
 } from "@/lib/db";
 
@@ -174,142 +188,194 @@ function numberToWords(n) {
   return result.trim() + " Only";
 }
 
-function downloadReceipt({ payment, client, group, ticketNo, chitDueNo }) {
-  const receiptNo = payment._id ? parseInt(payment._id.slice(-5), 16) % 9000 + 1000 : Math.floor(Math.random() * 9000 + 1000);
-  const totalChit = Number(group.monthlyAmount) * Number(group.durationMonths);
-  const chitLabel = totalChit >= 100000
-    ? (totalChit / 100000) + " Lakhs"
-    : formatCurrency(totalChit);
-  const amtWords = numberToWords(Number(payment.amount));
-  const formattedAmt = Number(payment.amount).toLocaleString("en-IN") + "/-";
-  const isNonCash = ["UPI", "Bank Transfer", "Cheque"].includes(payment.mode);
+async function downloadReceipt({ payment, client, group, ticketNo, chitDueNo }) {
+  try {
+    const { jsPDF } = await import("jspdf");
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8"/>
-<title>Receipt No. ${receiptNo}</title>
-<style>
-  @page { size: A5 landscape; margin: 8mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
-  .receipt { border: 2.5px solid #006400; padding: 10px 14px 8px; min-height: 190px; }
-  .top { display: flex; align-items: flex-start; justify-content: space-between; }
-  .top-left, .top-right { font-size: 10px; color: #006400; font-weight: bold; min-width: 160px; }
-  .top-right { text-align: right; }
-  .logo { text-align: center; flex: 1; }
-  .logo svg { width: 36px; height: 36px; }
-  .company { text-align: center; color: #006400; margin-top: 2px; }
-  .company-name { font-size: 19px; font-weight: 900; letter-spacing: 0.5px; }
-  .company-addr { font-size: 10px; margin-top: 1px; }
-  .divider { border-top: 1.5px dotted #006400; margin: 6px 0 4px; }
-  .ref-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-  .ref-no { font-size: 13px; font-weight: bold; }
-  .receipt-title { font-size: 15px; font-weight: bold; text-decoration: underline; }
-  .date-right { font-size: 11px; }
-  .field-row { display: flex; align-items: baseline; margin-bottom: 5px; gap: 4px; }
-  .field-label { font-weight: bold; white-space: nowrap; min-width: fit-content; }
-  .field-value { border-bottom: 1px dotted #555; flex: 1; padding-bottom: 1px; min-width: 0; word-break: break-all; }
-  .inline-group { display: flex; gap: 16px; flex: 1; }
-  .inline-group .field-row { flex: 1; }
-  .amount-words { margin-bottom: 5px; }
-  .amount-words .field-value { min-height: 16px; }
-  .amount-final { margin-bottom: 14px; }
-  .footer { display: flex; justify-content: space-between; font-weight: bold; font-size: 10.5px; margin-top: 4px; }
-</style>
-</head>
-<body>
-<div class="receipt">
-  <div class="top">
-    <div class="top-left">
-      GSTIN : 33AAQCA9731R1ZU<br/>
-      CIN NO : U65992TN2018PTC 123004
-    </div>
-    <div class="logo">
-      <img src="${LOGO_B64}" alt="Logo" style="width:70px;height:70px;object-fit:contain;" />
-    </div>
-    <div class="top-right">
-    Phone : 9444207983<br/>
-    Email : aknithchits@gmail.com
-    </div>
-  </div>
+    const receiptNo = payment._id ? parseInt(payment._id.slice(-5), 16) % 9000 + 1000 : Math.floor(Math.random() * 9000 + 1000);
+    const totalChit = Number(group.monthlyAmount) * Number(group.durationMonths);
+    const chitLabel = totalChit >= 100000 ? (totalChit / 100000) + " Lakhs" : formatCurrency(totalChit);
+    const amtWords = numberToWords(Number(payment.amount));
+    const formattedAmt = Number(payment.amount).toLocaleString("en-IN") + "/-";
+    const isNonCash = ["UPI", "Bank Transfer", "Cheque"].includes(payment.mode);
+    const phone = (client.phones?.[0] || client.phone || "").replace(/\D/g, "");
+    const txnLabel = payment.mode === "Cheque" ? "Cheque No." :
+                     payment.mode === "UPI" ? "UPI Transaction ID" :
+                     payment.mode === "Bank Transfer" ? "Bank Ref. / Txn ID" : "Ref. No.";
+    const txnValue = isNonCash
+      ? (payment.transactionId || "—") + "   Date: " + (payment.paymentDate || "")
+      : "N/A";
 
-  <div class="company">
-    <div class="company-name">AKNITH CHITS PRIVATE LIMITED</div>
-    <div class="company-addr">No. 10, Abdul Kalam Street, Nagalkeni, Chromepet, Chennai - 600 044.</div>
-  </div>
+    const encOpts = phone
+      ? { encryption: { userPassword: phone, ownerPassword: phone, userPermissions: ["print"] } }
+      : {};
 
-  <div class="divider"></div>
+    // A5 landscape: 210 × 148 mm
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a5", ...encOpts });
+    const W = pdf.internal.pageSize.getWidth();   // 210
+    const H = pdf.internal.pageSize.getHeight();  // 148
+    const L = 7;   // left margin
+    const R = W - 7; // right edge
+    const G = [0, 100, 0];   // green #006400
+    const K = [0, 0, 0];     // black
+    const D = [100, 100, 100]; // grey for dotted lines
 
-  <div class="ref-row">
-    <span>No. &nbsp;<span class="ref-no">${receiptNo}</span></span>
-    <span class="receipt-title">RECEIPT</span>
-    <span class="date-right">Date : &nbsp;&nbsp;${payment.paymentDate || new Date().toLocaleDateString("en-IN")}</span>
-  </div>
+    const dot = () => { pdf.setLineDashPattern([0.8, 0.8], 0); pdf.setLineWidth(0.25); };
+    const solid = () => { pdf.setLineDashPattern([], 0); pdf.setLineWidth(0.5); };
 
-  <div class="field-row">
-    <span class="field-label">Customer Name Mr/Mrs</span>
-    <span class="field-value">&nbsp;${client.name}</span>
-  </div>
+    // ── Outer border ──
+    pdf.setDrawColor(...G);
+    solid();
+    pdf.setLineWidth(0.7);
+    pdf.rect(4, 4, W - 8, H - 8);
 
-  <div class="field-row">
-    <span class="field-label">Group No.</span>
-    <span class="field-value" style="max-width:90px">&nbsp;${group.groupNumber || group.name}</span>
-    &nbsp;&nbsp;
-    <span class="field-label">Chit :</span>
-    <span class="field-value" style="max-width:80px">&nbsp;${chitLabel}</span>
-    &nbsp;&nbsp;
-    <span class="field-label">Ticket No. :</span>
-    <span class="field-value" style="max-width:50px">&nbsp;${ticketNo}</span>
-    &nbsp;&nbsp;
-    <span class="field-label">Chit Due No. :</span>
-    <span class="field-value" style="max-width:50px">&nbsp;${chitDueNo}</span>
-  </div>
+    // ── Logo ──
+    pdf.addImage(LOGO_B64, "JPEG", W / 2 - 11, 6, 22, 22);
 
-  <div class="field-row">
-    <span class="field-label">Payment Mode</span>
-    <span class="field-value" style="max-width:120px">&nbsp;${payment.mode}</span>
-    &nbsp;&nbsp;
-    <span class="field-label">${
-      payment.mode === "Cheque"       ? "Cheque No." :
-      payment.mode === "UPI"          ? "UPI Transaction ID" :
-      payment.mode === "Bank Transfer"? "Bank Ref. / Txn ID" :
-                                        "Ref. No."
-    }</span>
-    <span class="field-value" style="font-weight:${isNonCash ? "bold" : "normal"}; letter-spacing:${isNonCash ? "0.3px" : "0"}">
-      &nbsp;${isNonCash ? (payment.transactionId || "—") : "N/A"} ${isNonCash ? `&nbsp;&nbsp; Date: ${payment.paymentDate || ""}` : ""}
-    </span>
-  </div>
+    // ── Top-left: GSTIN / CIN ──
+    pdf.setFontSize(7.5); pdf.setFont("helvetica", "bold"); pdf.setTextColor(...G);
+    pdf.text("GSTIN : 33AAQCA9731R1ZU",         L, 13);
+    pdf.text("CIN NO : U65992TN2018PTC 123004",  L, 18);
 
-  <div class="field-row amount-words">
-    <span class="field-label">Amount in words</span>
-    <span class="field-value">&nbsp;${amtWords}</span>
-  </div>
-  <div class="field-row" style="margin-bottom:2px;">
-    <span class="field-value" style="max-width:50px; border:none">&nbsp;</span>
-  </div>
+    // ── Top-right: Phone / Email ──
+    pdf.text("Phone : 9444207983",        R, 13, { align: "right" });
+    pdf.text("Email : aknithchits@gmail.com", R, 18, { align: "right" });
 
-  <div class="field-row amount-final">
-    <span class="field-label">Amount Rs.</span>
-    <span class="field-value" style="max-width:180px">&nbsp;${formattedAmt}</span>
-  </div>
+    // ── Company name & address ──
+    let y = 32;
+    pdf.setFontSize(13); pdf.setFont("helvetica", "bold"); pdf.setTextColor(...G);
+    pdf.text("AKNITH CHITS PRIVATE LIMITED", W / 2, y, { align: "center" });
+    y += 4.5;
+    pdf.setFontSize(7.5); pdf.setFont("helvetica", "normal");
+    pdf.text("No. 10, Abdul Kalam Street, Nagalkeni, Chromepet, Chennai - 600 044.", W / 2, y, { align: "center" });
+    y += 3.5;
 
-  <div class="divider"></div>
-  <div class="footer">
-    <span>Subject to Realisation</span>
-    <span>Cash Receiver</span>
-  </div>
-</div>
-<script>window.onload = function(){ window.print(); }</script>
-</body>
-</html>`;
+    // ── Divider ──
+    pdf.setDrawColor(...G); dot();
+    pdf.line(L, y, R, y);
+    y += 4;
 
-  const w = window.open("", "_blank", "width=900,height=600");
-  w.document.write(html);
-  w.document.close();
+    // ── No. | RECEIPT | Date ──
+    pdf.setTextColor(...K);
+    pdf.setFontSize(7.5); pdf.setFont("helvetica", "normal");
+    pdf.text("No.", L, y);
+    pdf.setFontSize(9.5); pdf.setFont("helvetica", "bold");
+    pdf.text(String(receiptNo), L + 6, y);
+
+    pdf.setFontSize(12); pdf.setFont("helvetica", "bold");
+    pdf.text("RECEIPT", W / 2, y, { align: "center" });
+    const rw = pdf.getTextWidth("RECEIPT");
+    solid(); pdf.setLineWidth(0.3); pdf.setDrawColor(...K);
+    pdf.line(W / 2 - rw / 2, y + 0.6, W / 2 + rw / 2, y + 0.6);
+
+    pdf.setFontSize(7.5); pdf.setFont("helvetica", "normal");
+    pdf.text("Date :   " + (payment.paymentDate || new Date().toLocaleDateString("en-IN")), R, y, { align: "right" });
+    y += 5.5;
+
+    // ── Field row helper (label + dotted underline + value) ──
+    const field = (label, value, x, colW, bold = false) => {
+      pdf.setFont("helvetica", "bold"); pdf.setFontSize(7.5); pdf.setTextColor(...K);
+      pdf.text(label, x, y);
+      const lw = pdf.getTextWidth(label) + 1.5;
+      pdf.setDrawColor(...D); dot();
+      pdf.line(x + lw, y + 0.4, x + colW - 1, y + 0.4);
+      pdf.setFont("helvetica", bold ? "bold" : "normal");
+      const val = String(value);
+      const maxW = colW - lw - 2;
+      const clipped = pdf.getTextWidth(val) > maxW
+        ? pdf.splitTextToSize(val, maxW)[0]
+        : val;
+      pdf.text(" " + clipped, x + lw, y);
+    };
+
+    // ── Customer name ──
+    field("Customer Name Mr/Mrs", client.name, L, R - L);
+    y += 5.5;
+
+    // ── Group / Chit / Ticket / Due ──
+    const cols4 = (R - L) / 4;
+    field("Group No.",     String(group.groupNumber || group.name), L,             cols4);
+    field("Chit :",        chitLabel,                               L + cols4,     cols4);
+    field("Ticket No. :",  String(ticketNo),                        L + cols4 * 2, cols4);
+    field("Chit Due No. :", String(chitDueNo),                      L + cols4 * 3, cols4);
+    y += 5.5;
+
+    // ── Payment mode / Ref ──
+    const cols2 = (R - L) / 2;
+    field("Payment Mode", payment.mode, L,         cols2);
+    field(txnLabel,        txnValue,    L + cols2,  cols2, isNonCash);
+    y += 5.5;
+
+    // ── Amount in words ──
+    field("Amount in words", amtWords, L, R - L);
+    y += 5.5;
+
+    // ── Amount Rs. ──
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(7.5); pdf.setTextColor(...K);
+    pdf.text("Amount Rs.", L, y);
+    const aw = pdf.getTextWidth("Amount Rs.") + 1.5;
+    pdf.setDrawColor(...D); dot();
+    pdf.line(L + aw, y + 0.4, L + aw + 40, y + 0.4);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(" " + formattedAmt, L + aw, y);
+    y += 5.5;
+
+    // ── Remarks ──
+    if (payment.remark) {
+      field("Remarks", payment.remark, L, R - L);
+      y += 5.5;
+    }
+
+    y += 1;
+
+    // ── E-Signature ──
+    // Signature image: 299×200px original → keep aspect ratio, height ~18mm
+    const sigH = 18;
+    const sigW = sigH * (299 / 200); // ~26.9mm
+    pdf.addImage(SIGN_B64, "PNG", R - sigW, y, sigW, sigH);
+    y += sigH + 1;
+
+    // ── Bottom divider (tight to signature) ──
+    pdf.setDrawColor(...G); dot();
+    pdf.line(L, y, R, y);
+
+    pdf.save(`Receipt_${client.name}_${payment.month}_${payment.year}.pdf`);
+  } catch (err) {
+    console.error("Receipt download failed:", err);
+    alert("Could not generate PDF: " + err.message);
+  }
 }
 
+const DEFAULT_PERMISSIONS = {
+  clients:  { view: false, create: false, edit: false, delete: false },
+  groups:   { view: false, create: false, edit: false, delete: false, manageMembers: false },
+  payments: { view: false, record: false },
+  reports:  { view: false, editSchedule: false, uploadDocs: false },
+};
+
+const SESSION_VERSION = "v1";
+
 function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      if (localStorage.getItem("chitfund_session_version") !== SESSION_VERSION) {
+        localStorage.removeItem("chitfund_user");
+        localStorage.setItem("chitfund_session_version", SESSION_VERSION);
+        return null;
+      }
+      return JSON.parse(localStorage.getItem("chitfund_user")) || null;
+    }
+    catch { return null; }
+  });
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [loginError, setLoginError] = useState("");
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showUserMgmt, setShowUserMgmt] = useState(false);
+  const [userList, setUserList] = useState([]);
+  const [userForm, setUserForm] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
+  const [deleteUserConfirm, setDeleteUserConfirm] = useState(null);
+
   // const [data, setData] = useState(initialData);4
   const [data, setData] = useState({
     clients: [],
@@ -337,6 +403,8 @@ function App() {
     startMonth: "January",
     startYear: String(currentYear),
     adminFeeAmount: "",
+    psoNo: "",
+    commNo: "",
   });
 
   const [selectedGroupId, setSelectedGroupId] = useState("");
@@ -344,8 +412,12 @@ function App() {
   const [searchAssignClient, setSearchAssignClient] = useState("");
   const [expandedClientIds, setExpandedClientIds] = useState([]);
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [dashSlide, setDashSlide] = useState(0);
+  const [dashPaused, setDashPaused] = useState(false);
   const [reportSearch, setReportSearch] = useState("");
   const [confirmPayDialog, setConfirmPayDialog] = useState(false);
+  const [paymentAddMode, setPaymentAddMode] = useState("update"); // "update" | "balance"
+  const [editTargetPaymentId, setEditTargetPaymentId] = useState(null);
   const [removeClientConfirm, setRemoveClientConfirm] = useState(null); // { groupId, groupName, clientId, clientName }
   const [deleteGroupConfirm, setDeleteGroupConfirm] = useState(null);
   const [deleteClientConfirm, setDeleteClientConfirm] = useState(null);
@@ -432,6 +504,12 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentForm.clientId, paymentForm.groupId]);
 
+  // Reset to "update" mode and clear any targeted payment when the selected slot changes
+  useEffect(() => {
+    setPaymentAddMode("update");
+    setEditTargetPaymentId(null);
+  }, [paymentForm.clientId, paymentForm.groupId, paymentForm.month, paymentForm.year]);
+
   const filteredClients = useMemo(() => {
     const q = searchClient.toLowerCase();
     return data.clients.filter(
@@ -462,6 +540,33 @@ function App() {
       .filter((p) => existingGroupIds.has(p.groupId))
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const totalPending = totalExpected - totalCollected;
+
+    const now = new Date();
+    const thisMonthTotal = data.payments
+      .filter((p) => {
+        const d = new Date(p.paymentDate);
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      })
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    const recentClients = [...data.clients].slice(-6).reverse();
+
+    const recentPayments = [...data.payments]
+      .sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate))
+      .slice(0, 6)
+      .map((p) => ({
+        ...p,
+        clientName: data.clients.find((c) => c._id === p.clientId)?.name || "—",
+        groupName: data.groups.find((g) => g._id === p.groupId)?.name || "—",
+      }));
+
+    const groupStats = data.groups.map((g) => ({
+      ...g,
+      memberCount: (g.memberIds || []).length,
+      paidCount: data.payments.filter((p) => p.groupId === g._id).length,
+      expectedCount: (g.memberIds || []).length * Number(g.durationMonths || 0),
+    }));
+
     return {
       clients: data.clients.length,
       groups: data.groups.length,
@@ -469,6 +574,10 @@ function App() {
       totalExpected,
       totalCollected,
       totalPending,
+      thisMonthTotal,
+      recentClients,
+      recentPayments,
+      groupStats,
     };
   }, [data]);
 
@@ -507,8 +616,8 @@ function App() {
   };
 
   const handleAddGroup = async () => {
-  if (!groupForm.groupNumber || !groupForm.name || !groupForm.monthlyAmount) {
-    alert("Group Number, Group Name, and Monthly Amount are required.");
+  if (!groupForm.groupNumber || !groupForm.name || !groupForm.monthlyAmount || !groupForm.psoNo || !groupForm.commNo) {
+    alert("Group Number, Group Name, Monthly Amount, PSO No, and Comm No are required.");
     return;
   }
   const duplicate = data.groups.some(
@@ -541,6 +650,8 @@ function App() {
     startMonth: "January",
     startYear: String(currentYear),
     adminFeeAmount: "",
+    psoNo: "",
+    commNo: "",
   });
 };
 
@@ -599,6 +710,7 @@ function App() {
         setData((prev) => ({ ...prev, payments: [newPayment, ...prev.payments] }));
       }
       setPaymentForm((prev) => ({ ...prev, amount: "", transactionId: "", remark: "" }));
+      setEditTargetPaymentId(null);
     } catch (err) {
       console.error(err);
       alert("Failed to save payment.");
@@ -753,6 +865,10 @@ function App() {
   }, [data.groups, paymentForm.groupId]);
 
   const existingPayment = useMemo(() => {
+    // If user clicked Edit on a specific payment, target that one directly
+    if (editTargetPaymentId) {
+      return data.payments.find((p) => p._id === editTargetPaymentId) || null;
+    }
     if (!paymentForm.groupId || !paymentForm.clientId || !paymentForm.month || !paymentForm.year) return null;
     return data.payments.find(
       (p) =>
@@ -761,7 +877,33 @@ function App() {
         p.month === paymentForm.month &&
         Number(p.year) === Number(paymentForm.year)
     ) || null;
+  }, [data.payments, editTargetPaymentId, paymentForm.groupId, paymentForm.clientId, paymentForm.month, paymentForm.year]);
+
+  // All payments recorded for the currently selected client + month slot
+  const allSlotPayments = useMemo(() => {
+    if (!paymentForm.groupId || !paymentForm.clientId || !paymentForm.month || !paymentForm.year) return [];
+    return data.payments.filter(
+      (p) =>
+        p.groupId === paymentForm.groupId &&
+        p.clientId === paymentForm.clientId &&
+        p.month === paymentForm.month &&
+        Number(p.year) === Number(paymentForm.year)
+    );
   }, [data.payments, paymentForm.groupId, paymentForm.clientId, paymentForm.month, paymentForm.year]);
+
+  // Scheduled amount (monthlyAmount - dividend) for the selected installment slot
+  const selectedSlotScheduled = useMemo(() => {
+    if (!paymentForm.groupId || !paymentForm.month || !paymentForm.year) return null;
+    const grp = data.groups.find((g) => g._id === paymentForm.groupId);
+    if (!grp) return null;
+    const tl = getGroupTimeline(grp);
+    const slot = tl.find((t) => t.month === paymentForm.month && t.year.toString() === paymentForm.year.toString());
+    if (!slot) return null;
+    const inst = data.installments.find((i) => i.groupId === paymentForm.groupId && i.installmentNo === slot.installmentNo);
+    const base = Number(grp.monthlyAmount || 0);
+    const div = inst ? Number(inst.dividend || 0) : 0;
+    return base > 0 ? base - div : null;
+  }, [paymentForm.groupId, paymentForm.month, paymentForm.year, data.groups, data.installments]);
 
   const groupMembers = useMemo(() => {
     const group = data.groups.find((g) => g._id === paymentForm.groupId);
@@ -770,6 +912,90 @@ function App() {
       .map((id) => data.clients.find((c) => c._id === id))
       .filter(Boolean);
   }, [data.clients, data.groups, paymentForm.groupId]);
+
+  // ── Auth helpers ──────────────────────────────────────────────────────────
+  const isSuperAdmin = currentUser?.role === "superadmin";
+  const canDo = (section, action) => {
+    if (!currentUser) return false;
+    if (isSuperAdmin) return true;
+    return !!currentUser.permissions?.[section]?.[action];
+  };
+
+  const handleLogin = async () => {
+    setLoginError("");
+    try {
+      const user = await loginUser(loginForm.username, loginForm.password);
+      setCurrentUser(user);
+      localStorage.setItem("chitfund_user", JSON.stringify(user));
+      localStorage.setItem("chitfund_session_version", SESSION_VERSION);
+      setLoginForm({ username: "", password: "" });
+    } catch (err) {
+      setLoginError(err.message || "Invalid username or password");
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem("chitfund_user");
+    setShowProfileMenu(false);
+    setActiveTab("dashboard");
+  };
+
+  const idleTimerRef = useRef(null);
+  const IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const resetTimer = () => {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        handleLogout();
+      }, IDLE_TIMEOUT_MS);
+    };
+
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
+    events.forEach((e) => window.addEventListener(e, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      clearTimeout(idleTimerRef.current);
+      events.forEach((e) => window.removeEventListener(e, resetTimer));
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (activeTab !== "dashboard" || dashPaused) return;
+    const t = setInterval(() => setDashSlide((s) => (s + 1) % 3), 4000);
+    return () => clearInterval(t);
+  }, [activeTab, dashPaused]);
+
+  const openUserMgmt = async () => {
+    setShowProfileMenu(false);
+    const users = await getUsers();
+    setUserList(users);
+    setShowUserMgmt(true);
+  };
+
+  const handleSaveUser = async () => {
+    if (!userForm.username || !userForm.password) { alert("Username and password required."); return; }
+    try {
+      if (editingUser) {
+        const updated = await updateUserApi(editingUser._id, userForm);
+        setUserList(prev => prev.map(u => u._id === editingUser._id ? updated : u));
+      } else {
+        const created = await addUser(userForm);
+        setUserList(prev => [...prev, created]);
+      }
+      setUserForm(null); setEditingUser(null);
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleDeleteUser = async () => {
+    await deleteUserApi(deleteUserConfirm._id);
+    setUserList(prev => prev.filter(u => u._id !== deleteUserConfirm._id));
+    setDeleteUserConfirm(null);
+  };
 
   const draggedIdxRef = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
@@ -797,6 +1023,74 @@ function App() {
     }
   };
 
+  // Drag state for Assigned Clients table in Group Management (scoped per group)
+  const grpDragRef = useRef({ groupId: null, fromIdx: null });
+  const [grpDragOver, setGrpDragOver] = useState({ groupId: null, idx: null });
+
+  const handleGroupClientDrop = async (group, dropIdx) => {
+    const { groupId, fromIdx } = grpDragRef.current;
+    setGrpDragOver({ groupId: null, idx: null });
+    grpDragRef.current = { groupId: null, fromIdx: null };
+    if (!groupId || fromIdx === null || fromIdx === dropIdx) return;
+    const newMemberIds = [...(group.memberIds || [])];
+    const [moved] = newMemberIds.splice(fromIdx, 1);
+    newMemberIds.splice(dropIdx, 0, moved);
+    setData((prev) => ({
+      ...prev,
+      groups: prev.groups.map((g) => g._id === groupId ? { ...g, memberIds: newMemberIds } : g),
+    }));
+    try {
+      await updateGroupMembers(groupId, newMemberIds);
+    } catch (err) {
+      alert("Failed to save order: " + err.message);
+    }
+  };
+
+  // ── Login screen ──────────────────────────────────────────────────────────
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="flex flex-col items-center gap-3">
+            <img src={LOGO_B64} alt="Logo" className="h-20 w-20 object-contain" />
+            <div className="text-center">
+              <h1 className="text-2xl font-bold tracking-tight">AKNITH CHITS</h1>
+              <p className="text-sm text-slate-500">Chit Fund Management System</p>
+            </div>
+          </div>
+          <Card className="rounded-2xl border-0 shadow-md">
+            <CardContent className="pt-6 space-y-4">
+              <div>
+                <Label>Username</Label>
+                <Input
+                  placeholder="Enter username"
+                  value={loginForm.username}
+                  onChange={e => setLoginForm(f => ({ ...f, username: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && handleLogin()}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  placeholder="Enter password"
+                  value={loginForm.password}
+                  onChange={e => setLoginForm(f => ({ ...f, password: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && handleLogin()}
+                />
+              </div>
+              {loginError && <p className="text-sm text-red-500 font-medium">{loginError}</p>}
+              <Button className="w-full rounded-xl" onClick={handleLogin}>
+                Login
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full min-h-screen p-6">
       <div className="w-full min-h-screen p-6">
@@ -815,9 +1109,40 @@ function App() {
               monthly payments for one year.
             </p>
           </div>
-          <Badge className="rounded-full px-4 py-2 text-sm">
-            Local database enabled
-          </Badge>
+          <div className="relative" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setShowProfileMenu(false); }}>
+            <button
+              className="flex items-center gap-2 rounded-full bg-slate-100 hover:bg-slate-200 px-4 py-2 text-sm font-medium transition-colors"
+              onClick={() => setShowProfileMenu(p => !p)}
+            >
+              <div className="h-7 w-7 rounded-full bg-green-700 text-white text-xs font-bold flex items-center justify-center">
+                {(currentUser.displayName || currentUser.username || "U")[0].toUpperCase()}
+              </div>
+              <span>{currentUser.displayName || currentUser.username}</span>
+              <span className="text-[10px] text-slate-400">{isSuperAdmin ? "Super Admin" : "Operator"}</span>
+            </button>
+            {showProfileMenu && (
+              <div className="absolute right-0 top-12 z-50 w-48 rounded-xl border bg-white shadow-lg py-1">
+                <div className="px-4 py-2 border-b">
+                  <p className="text-xs font-semibold">{currentUser.displayName || currentUser.username}</p>
+                  <p className="text-[11px] text-slate-400">{isSuperAdmin ? "Super Admin" : "Operator"}</p>
+                </div>
+                {isSuperAdmin && (
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 transition-colors"
+                    onClick={openUserMgmt}
+                  >
+                    Manage Users
+                  </button>
+                )}
+                <button
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  onClick={handleLogout}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
         </motion.div>
 
         <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -858,73 +1183,261 @@ function App() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 gap-2 rounded-2xl bg-white p-2 shadow-sm md:grid-cols-5">
-            <TabsTrigger value="dashboard" className="rounded-xl">
-              Dashboard
-            </TabsTrigger>
-            <TabsTrigger value="clients" className="rounded-xl">
-              Clients
-            </TabsTrigger>
-            <TabsTrigger value="groups" className="rounded-xl">
-              Groups
-            </TabsTrigger>
-            <TabsTrigger value="payments" className="rounded-xl">
-              Payments
-            </TabsTrigger>
-            <TabsTrigger value="reports" className="rounded-xl">
-              Reports
-            </TabsTrigger>
+          <TabsList className="flex w-full gap-2 rounded-2xl bg-white p-2 shadow-sm flex-wrap">
+            {[
+              { value: "dashboard", label: "Dashboard", show: true },
+              { value: "clients",   label: "Clients",   show: canDo("clients","view") },
+              { value: "groups",    label: "Groups",    show: canDo("groups","view") },
+              { value: "payments",  label: "Payments",  show: canDo("payments","view") },
+              { value: "reports",   label: "Reports",   show: canDo("reports","view") },
+            ].filter((t) => t.show).map((t) => (
+              <TabsTrigger
+                key={t.value}
+                value={t.value}
+                className="rounded-xl flex-1 font-medium text-slate-500 transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-md"
+              >
+                {t.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
 
+          {/* ── User Management Dialog (super admin only) ── */}
+          <Dialog open={showUserMgmt} onOpenChange={o => { if (!o) { setShowUserMgmt(false); setUserForm(null); setEditingUser(null); } }}>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Manage Operator Users</DialogTitle>
+              </DialogHeader>
+              {userForm ? (
+                <div className="space-y-4 pt-2">
+                  <h3 className="font-semibold">{editingUser ? "Edit Operator" : "New Operator"}</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Username</Label><Input value={userForm.username} onChange={e => setUserForm(f => ({ ...f, username: e.target.value }))} disabled={!!editingUser} /></div>
+                    <div><Label>Display Name</Label><Input value={userForm.displayName || ""} onChange={e => setUserForm(f => ({ ...f, displayName: e.target.value }))} /></div>
+                    <div><Label>Password</Label><Input type="password" value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))} /></div>
+                  </div>
+                  <div className="space-y-3 rounded-xl border p-4">
+                    <p className="text-sm font-semibold text-slate-700">Permissions</p>
+                    {[
+                      { key: "clients",  label: "Clients",  actions: ["view","create","edit","delete"] },
+                      { key: "groups",   label: "Groups",   actions: ["view","create","edit","delete","manageMembers"] },
+                      { key: "payments", label: "Payments", actions: ["view","record"] },
+                      { key: "reports",  label: "Reports",  actions: ["view","editSchedule","uploadDocs"] },
+                    ].map(({ key, label, actions }) => (
+                      <div key={key}>
+                        <p className="text-xs font-medium text-slate-500 uppercase mb-1">{label}</p>
+                        <div className="flex flex-wrap gap-3">
+                          {actions.map(action => (
+                            <label key={action} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!userForm.permissions?.[key]?.[action]}
+                                onChange={e => setUserForm(f => ({ ...f, permissions: { ...f.permissions, [key]: { ...f.permissions?.[key], [action]: e.target.checked } } }))}
+                              />
+                              {action.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase())}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1 rounded-xl" onClick={() => { setUserForm(null); setEditingUser(null); }}>Cancel</Button>
+                    <Button className="flex-1 rounded-xl" onClick={handleSaveUser}>Save</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 pt-2">
+                  <Button className="rounded-xl" onClick={() => setUserForm({ username: "", password: "", displayName: "", permissions: JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS)) })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add Operator
+                  </Button>
+                  {userList.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-4 text-center">No operators created yet.</p>
+                  ) : userList.map(u => (
+                    <div key={u._id} className="flex items-center justify-between rounded-xl border p-3">
+                      <div>
+                        <p className="font-medium text-sm">{u.displayName || u.username}</p>
+                        <p className="text-xs text-slate-400">@{u.username}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => { setEditingUser(u); setUserForm({ username: u.username, password: u.password, displayName: u.displayName || "", permissions: JSON.parse(JSON.stringify(u.permissions || DEFAULT_PERMISSIONS)) }); }}>
+                          <Pencil className="h-4 w-4 text-blue-500" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => setDeleteUserConfirm(u)}>
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete user confirm */}
+          <Dialog open={!!deleteUserConfirm} onOpenChange={o => !o && setDeleteUserConfirm(null)}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader><DialogTitle>Delete Operator?</DialogTitle></DialogHeader>
+              <p className="text-sm text-slate-600">Delete operator <span className="font-semibold">{deleteUserConfirm?.displayName || deleteUserConfirm?.username}</span>? They will no longer be able to log in.</p>
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteUserConfirm(null)}>Cancel</Button>
+                <Button variant="destructive" className="flex-1 rounded-xl" onClick={handleDeleteUser}>Delete</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <TabsContent value="dashboard" className="space-y-6">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card className="rounded-2xl border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle>Quick Overview</CardTitle>
-                  <CardDescription>
-                    Summary of current chit fund records
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-4">
-                    <span className="text-slate-600">
-                      Expected Yearly Collection
-                    </span>
-                    <span className="font-semibold">
-                      {formatCurrency(dashboard.totalExpected)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-4">
-                    <span className="text-slate-600">Recorded Payments</span>
-                    <span className="font-semibold">{dashboard.payments}</span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-4">
-                    <span className="text-slate-600">Current Year</span>
-                    <span className="font-semibold">{currentYear}</span>
-                  </div>
+            <div className="grid gap-6 lg:grid-cols-3">
+              {/* ── Sliding carousel ── */}
+              <Card className="lg:col-span-2 rounded-2xl border-0 shadow-sm overflow-hidden" onMouseEnter={() => setDashPaused(true)} onMouseLeave={() => setDashPaused(false)}>
+                {/* Slide header tabs */}
+                <div className="flex border-b border-slate-100">
+                  {[
+                    { label: "Clients", icon: Users },
+                    { label: "Payments", icon: IndianRupee },
+                    { label: "Groups", icon: Layers3 },
+                  ].map(({ label, icon: Icon }, idx) => (
+                    <button
+                      key={label}
+                      onClick={() => setDashSlide(idx)}
+                      className={`flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
+                        dashSlide === idx
+                          ? "border-b-2 border-slate-900 text-slate-900"
+                          : "text-slate-400 hover:text-slate-600"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Slide body */}
+                <CardContent className="p-0">
+                  {/* Slide 0: Recent Clients */}
+                  {dashSlide === 0 && (
+                    <motion.div key="clients" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="divide-y divide-slate-50">
+                      {dashboard.recentClients.length === 0 ? (
+                        <p className="py-10 text-center text-sm text-slate-400">No clients added yet.</p>
+                      ) : dashboard.recentClients.map((c) => (
+                        <div key={c._id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
+                          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-700">
+                            {(c.name || "?")[0].toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{c.name}</p>
+                            <p className="text-xs text-slate-400">{c.clientCode} · {(c.phones?.[0] || c.phone || "—")}</p>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-slate-300" />
+                        </div>
+                      ))}
+                      {data.clients.length > 6 && (
+                        <p className="py-2 text-center text-xs text-slate-400">+{data.clients.length - 6} more clients</p>
+                      )}
+                    </motion.div>
+                  )}
+
+                  {/* Slide 1: Recent Payments */}
+                  {dashSlide === 1 && (
+                    <motion.div key="payments" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="divide-y divide-slate-50">
+                      {dashboard.recentPayments.length === 0 ? (
+                        <p className="py-10 text-center text-sm text-slate-400">No payments recorded yet.</p>
+                      ) : dashboard.recentPayments.map((p) => (
+                        <div key={p._id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
+                          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-green-50 text-green-700">
+                            <IndianRupee className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{p.clientName}</p>
+                            <p className="text-xs text-slate-400">{p.groupName} · {p.month} {p.year}</p>
+                          </div>
+                          <span className="text-sm font-semibold text-green-700">{formatCurrency(Number(p.amount))}</span>
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
+
+                  {/* Slide 2: Groups Status */}
+                  {dashSlide === 2 && (
+                    <motion.div key="groups" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="divide-y divide-slate-50">
+                      {dashboard.groupStats.length === 0 ? (
+                        <p className="py-10 text-center text-sm text-slate-400">No groups created yet.</p>
+                      ) : dashboard.groupStats.map((g) => {
+                        const pct = g.expectedCount > 0 ? Math.min(100, Math.round((g.paidCount / g.expectedCount) * 100)) : 0;
+                        return (
+                          <div key={g._id} className="px-5 py-3 hover:bg-slate-50 transition-colors">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <p className="font-medium text-sm">{g.name}</p>
+                              <span className="text-xs text-slate-400">{g.memberCount} members · {g.durationMonths}m</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                                <div className="h-2 rounded-full bg-slate-800 transition-all" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-xs font-medium text-slate-500 w-8 text-right">{pct}%</span>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1">{g.paidCount} / {g.expectedCount} payments · {formatCurrency(Number(g.monthlyAmount || 0))}/mo</p>
+                          </div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
                 </CardContent>
+
+                {/* Dot navigation */}
+                <div className="flex items-center justify-between px-5 py-3 border-t border-slate-50">
+                  <button onClick={() => setDashSlide((s) => (s + 2) % 3)} className="rounded-lg p-1 hover:bg-slate-100 transition-colors">
+                    <ChevronLeft className="h-4 w-4 text-slate-400" />
+                  </button>
+                  <div className="flex gap-2">
+                    {[0, 1, 2].map((i) => (
+                      <button key={i} onClick={() => setDashSlide(i)} className={`h-2 rounded-full transition-all ${dashSlide === i ? "w-6 bg-slate-800" : "w-2 bg-slate-200"}`} />
+                    ))}
+                  </div>
+                  <button onClick={() => setDashSlide((s) => (s + 1) % 3)} className="rounded-lg p-1 hover:bg-slate-100 transition-colors">
+                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                  </button>
+                </div>
               </Card>
 
+              {/* ── Collection summary panel ── */}
               <Card className="rounded-2xl border-0 shadow-sm">
-                <CardHeader>
-                  <CardTitle>How this works</CardTitle>
-                  <CardDescription>
-                    Simple workflow for daily usage
-                  </CardDescription>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <TrendingUp className="h-5 w-5 text-slate-600" /> Collection
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4 text-sm text-slate-600">
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    1. Add clients separately in the client section.
+                <CardContent className="space-y-5">
+                  {/* Progress bar */}
+                  <div>
+                    <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                      <span>Collected</span>
+                      <span>{dashboard.totalExpected > 0 ? Math.round((dashboard.totalCollected / dashboard.totalExpected) * 100) : 0}%</span>
+                    </div>
+                    <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className="h-3 rounded-full bg-slate-800 transition-all"
+                        style={{ width: `${dashboard.totalExpected > 0 ? Math.min(100, (dashboard.totalCollected / dashboard.totalExpected) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(dashboard.totalCollected)}</span>
+                      <span className="text-xs text-slate-400">{formatCurrency(dashboard.totalExpected)}</span>
+                    </div>
                   </div>
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    2. Create a chit group with monthly amount and duration.
-                  </div>
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    3. Add only existing clients into a selected group.
-                  </div>
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    4. Record every month payment and review pending months in
-                    reports.
+
+                  <div className="space-y-2">
+                    {[
+                      { label: "This Month", value: formatCurrency(dashboard.thisMonthTotal), accent: true },
+                      { label: "Pending", value: formatCurrency(dashboard.totalPending) },
+                      { label: "Total Payments", value: `${dashboard.payments} entries` },
+                      { label: "Active Groups", value: `${dashboard.groups} groups` },
+                      { label: "Current Year", value: String(currentYear) },
+                    ].map(({ label, value, accent }) => (
+                      <div key={label} className={`flex items-center justify-between rounded-xl px-3 py-2.5 ${accent ? "bg-slate-900 text-white" : "bg-slate-50"}`}>
+                        <span className={`text-xs ${accent ? "text-slate-300" : "text-slate-500"}`}>{label}</span>
+                        <span className={`text-sm font-semibold ${accent ? "text-white" : "text-slate-800"}`}>{value}</span>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
@@ -1070,6 +1583,7 @@ function App() {
             </Dialog>
 
             <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
+              {canDo("clients","create") && (
               <Card className="rounded-2xl border-0 shadow-sm">
                 <CardHeader>
                   <CardTitle>Add Client</CardTitle>
@@ -1192,6 +1706,7 @@ function App() {
                   </Button>
                 </CardContent>
               </Card>
+              )}
 
               <Card className="rounded-2xl border-0 shadow-sm">
                 <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -1246,6 +1761,7 @@ function App() {
                               <TableCell>{client.address || "-"}</TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-1">
+                                  {canDo("clients","edit") && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -1263,6 +1779,8 @@ function App() {
                                   >
                                     <Pencil className="h-4 w-4 text-blue-500" />
                                   </Button>
+                                  )}
+                                  {canDo("clients","delete") && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -1270,6 +1788,7 @@ function App() {
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1448,6 +1967,16 @@ function App() {
                       <Label>Admin Fee — 1st Month Only (₹)</Label>
                       <Input type="number" value={editGroupForm.adminFeeAmount} onChange={(e) => setEditGroupForm({ ...editGroupForm, adminFeeAmount: e.target.value })} placeholder="0" />
                     </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>PSO No</Label>
+                        <Input value={editGroupForm.psoNo || ""} onChange={(e) => setEditGroupForm({ ...editGroupForm, psoNo: e.target.value })} placeholder="e.g. 14/2026" />
+                      </div>
+                      <div>
+                        <Label>Comm No</Label>
+                        <Input value={editGroupForm.commNo || ""} onChange={(e) => setEditGroupForm({ ...editGroupForm, commNo: e.target.value })} placeholder="e.g. 16/2026" />
+                      </div>
+                    </div>
                     <div className="flex gap-2 pt-1">
                       <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setEditGroupDialog(null)}>Cancel</Button>
                       <Button className="flex-1 rounded-xl" onClick={handleSaveEditGroup}>Save Changes</Button>
@@ -1467,6 +1996,16 @@ function App() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {/* 1. Group Name */}
+                    <div>
+                      <Label>Group Name</Label>
+                      <Input
+                        value={groupForm.name}
+                        onChange={(e) => setGroupForm({ ...groupForm, name: e.target.value })}
+                        placeholder="Silver Batch A"
+                      />
+                    </div>
+                    {/* 2. Group Number */}
                     <div>
                       <Label>
                         Group Number{" "}
@@ -1475,9 +2014,7 @@ function App() {
                       <div className="flex gap-2">
                         <Input
                           value={groupForm.groupNumber}
-                          onChange={(e) =>
-                            setGroupForm({ ...groupForm, groupNumber: e.target.value })
-                          }
+                          onChange={(e) => setGroupForm({ ...groupForm, groupNumber: e.target.value })}
                           placeholder="e.g. 10001"
                           className="font-mono"
                         />
@@ -1498,64 +2035,59 @@ function App() {
                         </Button>
                       </div>
                     </div>
-                    <div>
-                      <Label>Group Name</Label>
-                      <Input
-                        value={groupForm.name}
-                        onChange={(e) =>
-                          setGroupForm({ ...groupForm, name: e.target.value })
-                        }
-                        placeholder="Silver Batch A"
-                      />
+                    {/* 3. PSO No / Comm No */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>PSO No <span className="text-red-500">*</span></Label>
+                        <Input
+                          value={groupForm.psoNo}
+                          onChange={(e) => setGroupForm({ ...groupForm, psoNo: e.target.value })}
+                          placeholder="e.g. 14/2026"
+                        />
+                      </div>
+                      <div>
+                        <Label>Comm No <span className="text-red-500">*</span></Label>
+                        <Input
+                          value={groupForm.commNo}
+                          onChange={(e) => setGroupForm({ ...groupForm, commNo: e.target.value })}
+                          placeholder="e.g. 16/2026"
+                        />
+                      </div>
                     </div>
+                    {/* 4. Monthly Amount */}
                     <div>
                       <Label>Monthly Amount</Label>
                       <Input
                         type="number"
                         value={groupForm.monthlyAmount}
-                        onChange={(e) =>
-                          setGroupForm({
-                            ...groupForm,
-                            monthlyAmount: e.target.value,
-                          })
-                        }
+                        onChange={(e) => setGroupForm({ ...groupForm, monthlyAmount: e.target.value })}
                         placeholder="5000"
                       />
                     </div>
+                    {/* 5. Duration */}
                     <div>
                       <Label>Duration in Months</Label>
                       <Input
                         type="number"
                         value={groupForm.durationMonths}
-                        onChange={(e) =>
-                          setGroupForm({
-                            ...groupForm,
-                            durationMonths: e.target.value,
-                          })
-                        }
+                        onChange={(e) => setGroupForm({ ...groupForm, durationMonths: e.target.value })}
                         placeholder="12"
                       />
                     </div>
+                    {/* 6. Start Month / Start Year */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label>Start Month</Label>
                         <Select
                           value={groupForm.startMonth}
-                          onValueChange={(value) =>
-                            setGroupForm({
-                              ...groupForm,
-                              startMonth: value,
-                            })
-                          }
+                          onValueChange={(value) => setGroupForm({ ...groupForm, startMonth: value })}
                         >
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
                             {MONTHS.map((month) => (
-                              <SelectItem key={month} value={month}>
-                                {month}
-                              </SelectItem>
+                              <SelectItem key={month} value={month}>{month}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1565,34 +2097,22 @@ function App() {
                         <Input
                           type="number"
                           value={groupForm.startYear}
-                          onChange={(e) =>
-                            setGroupForm({
-                              ...groupForm,
-                              startYear: e.target.value,
-                            })
-                          }
+                          onChange={(e) => setGroupForm({ ...groupForm, startYear: e.target.value })}
                           placeholder={String(currentYear)}
                         />
                       </div>
                     </div>
+                    {/* 7. Admin Fee */}
                     <div>
                       <Label>Admin Fee — 1st Month Only (₹)</Label>
                       <Input
                         type="number"
                         value={groupForm.adminFeeAmount}
-                        onChange={(e) =>
-                          setGroupForm({
-                            ...groupForm,
-                            adminFeeAmount: e.target.value,
-                          })
-                        }
+                        onChange={(e) => setGroupForm({ ...groupForm, adminFeeAmount: e.target.value })}
                         placeholder="0"
                       />
                     </div>
-                    <Button
-                      className="w-full rounded-xl"
-                      onClick={handleAddGroup}
-                    >
+                    <Button className="w-full rounded-xl" onClick={handleAddGroup}>
                       Create Group
                     </Button>
                   </CardContent>
@@ -1673,12 +2193,14 @@ function App() {
                         </p>
                       )}
                     </div>
+                    {canDo("groups","manageMembers") && (
                     <Button
                       className="w-full rounded-xl"
                       onClick={assignClientsToGroup}
                     >
                       Assign Selected Clients
                     </Button>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -1716,11 +2238,21 @@ function App() {
                       <div key={group._id} className="rounded-2xl border p-5">
                         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                           <div className="space-y-2">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <h3 className="text-lg font-semibold">{group.name}</h3>
                               {group.groupNumber && (
                                 <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-bold text-blue-700 border border-blue-200">
                                   #{group.groupNumber}
+                                </span>
+                              )}
+                              {group.psoNo && (
+                                <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-mono font-semibold text-purple-700 border border-purple-200">
+                                  PSO: {group.psoNo}
+                                </span>
+                              )}
+                              {group.commNo && (
+                                <span className="rounded-md bg-teal-50 px-2 py-0.5 text-xs font-mono font-semibold text-teal-700 border border-teal-200">
+                                  Comm: {group.commNo}
                                 </span>
                               )}
                             </div>
@@ -1743,6 +2275,7 @@ function App() {
                             </div>
                           </div>
                           <div className="flex gap-1">
+                            {canDo("groups","edit") && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1761,6 +2294,8 @@ function App() {
                             >
                               <Pencil className="h-4 w-4 text-blue-500" />
                             </Button>
+                            )}
+                            {canDo("groups","delete") && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1768,38 +2303,172 @@ function App() {
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
-                          </div>
-                        </div>
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                          <p className="mb-3 text-sm font-medium text-slate-700">
-                            Assigned Clients
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {members.length > 0 ? (
-                              members.map((member) => (
-                                <Badge
-                                  key={member._id}
-                                  className="group flex cursor-pointer items-center gap-1 rounded-full px-3 py-1"
-                                  onClick={() =>
-                                    setRemoveClientConfirm({
-                                      groupId: group._id,
-                                      groupName: group.name,
-                                      clientId: member._id,
-                                      clientName: member.name,
-                                    })
-                                  }
-                                  title="Click to remove from group"
-                                >
-                                  {member.name}
-                                  <X className="h-3 w-3 opacity-0 transition-opacity group-hover:text-red-300 group-hover:opacity-100" />
-                                </Badge>
-                              ))
-                            ) : (
-                              <span className="text-sm text-slate-500">
-                                No clients assigned yet.
-                              </span>
                             )}
                           </div>
+                        </div>
+                        <div className="mt-4">
+                          <p className="mb-2 text-sm font-medium text-slate-700">Assigned Clients</p>
+                          {members.length === 0 ? (
+                            <p className="text-sm text-slate-400 py-3">No clients assigned yet.</p>
+                          ) : (
+                            <div className="overflow-x-auto rounded-xl border">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-slate-50">
+                                    <TableHead className="w-16 text-xs">Ticket No.</TableHead>
+                                    <TableHead className="text-xs">Client Name</TableHead>
+                                    <TableHead className="text-xs">Phone</TableHead>
+                                    <TableHead className="text-xs">Documents</TableHead>
+                                    {canDo("groups","manageMembers") && <TableHead className="w-10 text-xs"></TableHead>}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {members.map((member, mIdx) => {
+                                    const clientDocs = (group.clientDocs || []).filter((d) => d.clientId === member._id);
+                                    const isGrpDragOver = grpDragOver.groupId === group._id && grpDragOver.idx === mIdx;
+                                    return (
+                                      <TableRow
+                                        key={member._id}
+                                        draggable
+                                        onDragStart={() => { grpDragRef.current = { groupId: group._id, fromIdx: mIdx }; }}
+                                        onDragOver={(e) => { e.preventDefault(); setGrpDragOver({ groupId: group._id, idx: mIdx }); }}
+                                        onDragLeave={() => setGrpDragOver({ groupId: null, idx: null })}
+                                        onDrop={() => handleGroupClientDrop(group, mIdx)}
+                                        onDragEnd={() => { setGrpDragOver({ groupId: null, idx: null }); grpDragRef.current = { groupId: null, fromIdx: null }; }}
+                                        className={isGrpDragOver ? "bg-blue-50 border-t-2 border-blue-400" : ""}
+                                      >
+                                        <TableCell className="w-12 text-center select-none cursor-grab active:cursor-grabbing">
+                                          <div className="flex items-center justify-center gap-0.5 text-slate-400">
+                                            <GripVertical className="h-3 w-3" />
+                                            <span className="font-mono text-sm font-semibold text-slate-600">{mIdx + 1}</span>
+                                          </div>
+                                        </TableCell>
+                                        <TableCell className="font-medium text-sm">{member.name}</TableCell>
+                                        <TableCell className="text-sm text-slate-500">{(member.phones?.[0] || member.phone || "—")}</TableCell>
+                                        <TableCell>
+                                          <div className="flex flex-col gap-1">
+                                            {clientDocs.map((doc) => (
+                                              <div key={doc._id} className="flex items-center gap-1.5">
+                                                <a
+                                                  href={`http://localhost:5000/uploads/${doc.filename}`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="max-w-[140px] truncate text-xs text-blue-500 hover:underline"
+                                                  title={doc.name}
+                                                >
+                                                  {doc.name}
+                                                </a>
+                                                {isSuperAdmin && (
+                                                  <button
+                                                    title="Delete document"
+                                                    onClick={async () => {
+                                                      if (!window.confirm(`Delete "${doc.name}"?`)) return;
+                                                      const updated = await deleteGroupClientDoc(group._id, doc._id);
+                                                      setData((prev) => ({ ...prev, groups: prev.groups.map((g) => g._id === group._id ? updated : g) }));
+                                                    }}
+                                                  >
+                                                    <X className="h-3 w-3 text-red-400 hover:text-red-600" />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            ))}
+                                            {isSuperAdmin && (
+                                              <label className="flex cursor-pointer items-center gap-1 text-xs text-blue-500 hover:underline w-fit">
+                                                <Plus className="h-3 w-3" />
+                                                Upload
+                                                <input
+                                                  type="file"
+                                                  multiple
+                                                  className="hidden"
+                                                  onChange={async (e) => {
+                                                    const files = e.target.files;
+                                                    if (!files || files.length === 0) return;
+                                                    const fd = new FormData();
+                                                    Array.from(files).forEach((f) => fd.append("documents", f));
+                                                    const updated = await uploadGroupClientDocs(group._id, member._id, fd);
+                                                    setData((prev) => ({ ...prev, groups: prev.groups.map((g) => g._id === group._id ? updated : g) }));
+                                                    e.target.value = "";
+                                                  }}
+                                                />
+                                              </label>
+                                            )}
+                                          </div>
+                                        </TableCell>
+                                        {canDo("groups","manageMembers") && (
+                                          <TableCell className="text-center">
+                                            <button
+                                              title="Remove from group"
+                                              onClick={() => setRemoveClientConfirm({ groupId: group._id, groupName: group.name, clientId: member._id, clientName: member.name })}
+                                            >
+                                              <X className="h-4 w-4 text-slate-300 hover:text-red-500 transition-colors" />
+                                            </button>
+                                          </TableCell>
+                                        )}
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Group Reference Documents */}
+                        <div className="mt-4 border-t pt-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-sm font-medium text-slate-700">Group Documents</p>
+                            {isSuperAdmin && (
+                              <label className="flex cursor-pointer items-center gap-1 text-xs text-blue-500 hover:underline">
+                                <Plus className="h-3 w-3" />
+                                Upload
+                                <input
+                                  type="file"
+                                  multiple
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const files = e.target.files;
+                                    if (!files || files.length === 0) return;
+                                    const fd = new FormData();
+                                    Array.from(files).forEach((f) => fd.append("documents", f));
+                                    const updated = await uploadGroupDocs(group._id, fd);
+                                    setData((prev) => ({ ...prev, groups: prev.groups.map((g) => g._id === group._id ? updated : g) }));
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                          {(group.groupDocs || []).length === 0 ? (
+                            <p className="text-xs text-slate-400">No documents uploaded yet.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {(group.groupDocs || []).map((doc) => (
+                                <div key={doc._id} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                                  <a
+                                    href={`http://localhost:5000/uploads/${doc.filename}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="max-w-[180px] truncate text-xs text-blue-600 hover:underline"
+                                    title={doc.name}
+                                  >
+                                    {doc.name}
+                                  </a>
+                                  {isSuperAdmin && (
+                                    <button
+                                      title="Delete document"
+                                      onClick={async () => {
+                                        if (!window.confirm(`Delete "${doc.name}"?`)) return;
+                                        const updated = await deleteGroupDoc(group._id, doc._id);
+                                        setData((prev) => ({ ...prev, groups: prev.groups.map((g) => g._id === group._id ? updated : g) }));
+                                      }}
+                                    >
+                                      <X className="h-3 w-3 text-red-400 hover:text-red-600" />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1877,14 +2546,16 @@ function App() {
                           Cancel
                         </Button>
                         <Button
-                          className={`flex-1 rounded-xl ${snap ? "bg-amber-500 hover:bg-amber-600" : ""}`}
+                          className={`flex-1 rounded-xl ${paymentAddMode === "balance" ? "bg-green-600 hover:bg-green-700" : snap ? "bg-amber-500 hover:bg-amber-600" : ""}`}
                           onClick={async () => {
-                            const ep = existingPayment;
+                            // In balance mode always create a new record, never update
+                            const ep = paymentAddMode === "balance" ? null : existingPayment;
                             setConfirmPayDialog(false);
                             await recordPayment(ep);
+                            if (paymentAddMode === "balance") setPaymentAddMode("update");
                           }}
                         >
-                          {snap ? "Yes, Update" : "Confirm & Save"}
+                          {paymentAddMode === "balance" ? "Confirm Balance Payment" : snap ? "Yes, Update" : "Confirm & Save"}
                         </Button>
                       </div>
                     </div>
@@ -2075,35 +2746,100 @@ function App() {
                       placeholder="Optional remark"
                     />
                   </div>
-                  {existingPayment && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      <span className="font-semibold">Existing payment found.</span> Fields pre-filled — modify and save to update.
-                    </div>
-                  )}
+                  {/* ── Payment status banners ── */}
+                  {(() => {
+                    const totalPaid = allSlotPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+                    const isPartial = allSlotPayments.length > 0 && selectedSlotScheduled && totalPaid < selectedSlotScheduled;
+                    const balance = isPartial ? selectedSlotScheduled - totalPaid : 0;
+
+                    if (paymentAddMode === "balance") {
+                      return (
+                        <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 flex items-start justify-between gap-2">
+                          <div>
+                            <span className="font-semibold">Adding balance payment</span> — amount pre-filled with pending balance.
+                            <br/>Total paid so far: <span className="font-semibold">{formatCurrency(totalPaid)}</span> · Balance: <span className="font-semibold">{formatCurrency(balance)}</span>
+                          </div>
+                          <button className="shrink-0 text-blue-600 underline font-medium" onClick={() => {
+                            setPaymentAddMode("update");
+                            setPaymentForm(prev => ({
+                              ...prev,
+                              amount: existingPayment ? String(existingPayment.amount) : "",
+                              remark: existingPayment?.remark || "",
+                            }));
+                          }}>Cancel</button>
+                        </div>
+                      );
+                    }
+
+                    if (existingPayment && isSuperAdmin) {
+                      return (
+                        <div className="space-y-2">
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            <span className="font-semibold">
+                              {editTargetPaymentId && allSlotPayments.length > 1
+                                ? `Editing Payment ${allSlotPayments.findIndex(p => p._id === editTargetPaymentId) + 1} of ${allSlotPayments.length}.`
+                                : "Existing payment found."}
+                            </span>{" "}
+                            Fields pre-filled — modify and save to update.
+                            {allSlotPayments.length > 1 && (
+                              <span className="ml-1">(total {formatCurrency(totalPaid)})</span>
+                            )}
+                          </div>
+                          {isPartial && (
+                            <button
+                              className="w-full rounded-xl border border-green-300 bg-green-50 py-2 text-xs font-semibold text-green-800 hover:bg-green-100 transition-colors"
+                              onClick={() => {
+                                setPaymentAddMode("balance");
+                                setPaymentForm(prev => ({ ...prev, amount: String(balance), remark: "" }));
+                              }}
+                            >
+                              + Pay Balance — {formatCurrency(balance)} pending
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (existingPayment && !isSuperAdmin) {
+                      return (
+                        <div className="space-y-2">
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                            <span className="font-semibold">Payment already recorded</span> for this installment. Only super admin can edit existing payments.
+                          </div>
+                          {isPartial && canDo("payments","record") && (
+                            <button
+                              className="w-full rounded-xl border border-green-300 bg-green-50 py-2 text-xs font-semibold text-green-800 hover:bg-green-100 transition-colors"
+                              onClick={() => {
+                                setPaymentAddMode("balance");
+                                setPaymentForm(prev => ({ ...prev, amount: String(balance), remark: "" }));
+                              }}
+                            >
+                              + Pay Balance — {formatCurrency(balance)} pending
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
+
+                  {/* ── Save / Update button ── */}
+                  {(paymentAddMode === "balance" || !existingPayment || isSuperAdmin) && (
                   <Button
-                    className={`w-full rounded-xl ${existingPayment ? "bg-amber-500 hover:bg-amber-600" : ""}`}
+                    className={`w-full rounded-xl ${paymentAddMode === "balance" ? "bg-green-600 hover:bg-green-700" : existingPayment && isSuperAdmin ? "bg-amber-500 hover:bg-amber-600" : ""}`}
+                    disabled={!canDo("payments","record")}
                     onClick={() => {
-                      if (
-                        !paymentForm.groupId ||
-                        !paymentForm.clientId ||
-                        !paymentForm.amount ||
-                        !paymentForm.month
-                      ) {
+                      if (!canDo("payments","record")) return;
+                      if (!paymentForm.groupId || !paymentForm.clientId || !paymentForm.amount || !paymentForm.month) {
                         alert("Please fill in Group, Client, Installment Period, and Amount.");
                         return;
                       }
-                      if (
-                        ["UPI", "Bank Transfer", "Cheque"].includes(paymentForm.mode) &&
-                        !paymentForm.transactionId.trim()
-                      ) {
-                        alert(
-                          paymentForm.mode === "Cheque"
-                            ? "Please enter the Cheque Number."
-                            : `Please enter the ${paymentForm.mode} Transaction ID.`
-                        );
+                      if (["UPI", "Bank Transfer", "Cheque"].includes(paymentForm.mode) && !paymentForm.transactionId.trim()) {
+                        alert(paymentForm.mode === "Cheque" ? "Please enter the Cheque Number." : `Please enter the ${paymentForm.mode} Transaction ID.`);
                         return;
                       }
-                      if (existingPayment) {
+                      if (existingPayment && paymentAddMode === "update") {
                         setPaymentForm((prev) => ({
                           ...prev,
                           amount: prev.amount || String(existingPayment.amount),
@@ -2117,21 +2853,39 @@ function App() {
                     }}
                   >
                     <IndianRupee className="mr-2 h-4 w-4" />
-                    {existingPayment ? "Update Payment" : "Save Payment"}
+                    {paymentAddMode === "balance" ? "Save Balance Payment" : existingPayment && isSuperAdmin ? "Update Payment" : "Save Payment"}
                   </Button>
+                  )}
                 </CardContent>
               </Card>
 
               <Card className="rounded-2xl border-0 shadow-sm">
                 <CardHeader>
-                  <CardTitle>
-                    {paymentForm.groupId ? "Payment Tracking Matrix" : "Recent Payments"}
-                  </CardTitle>
-                  <CardDescription>
-                    {paymentForm.groupId 
-                      ? "Visual breakdown of monthly payments for this group" 
-                      : "Select a group on the left to view the payment matrix"}
-                  </CardDescription>
+                  <CardTitle>Payment Tracking Matrix</CardTitle>
+                  {paymentForm.groupId && (() => {
+                    const g = data.groups.find(gr => gr._id === paymentForm.groupId);
+                    if (!g) return null;
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap mt-1">
+                        <span className="text-base font-semibold text-slate-800">{g.name}</span>
+                        {g.groupNumber && (
+                          <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-bold text-blue-700 border border-blue-200">
+                            #{g.groupNumber}
+                          </span>
+                        )}
+                        {g.psoNo && (
+                          <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-mono font-semibold text-purple-700 border border-purple-200">
+                            PSO: {g.psoNo}
+                          </span>
+                        )}
+                        {g.commNo && (
+                          <span className="rounded-md bg-teal-50 px-2 py-0.5 text-xs font-mono font-semibold text-teal-700 border border-teal-200">
+                            Comm: {g.commNo}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </CardHeader>
                 <CardContent>
                   {paymentForm.groupId ? (() => {
@@ -2144,7 +2898,7 @@ function App() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-12 text-center text-xs">S.No</TableHead>
+                            <TableHead className="w-12 text-center text-xs">Ticket No.</TableHead>
                             <TableHead
                               className="min-w-[150px] cursor-pointer select-none hover:text-blue-600 transition-colors"
                               title="Click to expand/collapse all"
@@ -2199,27 +2953,35 @@ function App() {
                                   {member.name}
                                 </TableCell>
                                 {timeline.map((t, idx) => {
-                                  const payment = data.payments.find(
-                                    (p) =>
-                                      p.groupId === paymentForm.groupId &&
-                                      p.clientId === member._id &&
-                                      p.month === t.month &&
-                                      p.year.toString() === t.year.toString()
-                                  );
+                                  const cellPayments = data.payments
+                                    .filter(
+                                      (p) =>
+                                        p.groupId === paymentForm.groupId &&
+                                        p.clientId === member._id &&
+                                        p.month === t.month &&
+                                        p.year.toString() === t.year.toString()
+                                    )
+                                    .sort((a, b) => {
+                                      const da = new Date(a.paymentDate || 0);
+                                      const db = new Date(b.paymentDate || 0);
+                                      return da - db || (a._id < b._id ? -1 : 1);
+                                    });
+                                  const totalCellPaid = cellPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
                                   const installment = data.installments.find(
                                     (i) => i.groupId === paymentForm.groupId && i.installmentNo === t.installmentNo
                                   );
                                   const base = Number(group?.monthlyAmount || 0);
                                   const dividend = installment ? Number(installment.dividend || 0) : 0;
                                   const scheduledAmount = base > 0 ? base - dividend : null;
-                                  const isPartial = payment && scheduledAmount && Number(payment.amount) < scheduledAmount;
-                                  const balance = isPartial ? scheduledAmount - Number(payment.amount) : 0;
+                                  const hasPaid = cellPayments.length > 0;
+                                  const isPartial = hasPaid && scheduledAmount && totalCellPaid < scheduledAmount;
+                                  const balance = isPartial ? scheduledAmount - totalCellPaid : 0;
                                   return (
                                     <TableCell key={idx} className="px-1 text-center align-top py-3">
-                                      {payment ? (
+                                      {hasPaid ? (
                                         <div
-                                          className="flex flex-col items-center justify-start gap-1"
-                                          title={!isExpanded ? `Date: ${payment.paymentDate}\nAmount: ${formatCurrency(payment.amount)}\nMode: ${payment.mode || 'N/A'}${isPartial ? `\nBalance Due: ${formatCurrency(balance)}` : ''}` : undefined}
+                                          className="flex flex-col items-center justify-start gap-0.5"
+                                          title={!isExpanded ? `Total: ${formatCurrency(totalCellPaid)}${isPartial ? `\nBalance Due: ${formatCurrency(balance)}` : ""}` : undefined}
                                         >
                                           {isPartial ? (
                                             <AlertCircle className="mx-auto h-4 w-4 text-amber-500" />
@@ -2229,25 +2991,54 @@ function App() {
                                           {isExpanded && (
                                             <>
                                               <span className="text-[10px] text-slate-500 font-medium leading-tight whitespace-nowrap">
-                                                {formatCurrency(payment.amount)}
+                                                {formatCurrency(totalCellPaid)}
                                               </span>
                                               {isPartial && (
                                                 <span className="text-[10px] text-amber-600 font-semibold leading-tight whitespace-nowrap">
                                                   Bal: {formatCurrency(balance)}
                                                 </span>
                                               )}
-                                              <button
-                                                className="mt-0.5 text-[9px] text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap leading-tight"
-                                                title="Download receipt"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  const ticketNo = ((group?.memberIds || []).indexOf(member._id) + 1) || "—";
-                                                  const chitDueNo = idx + 1;
-                                                  downloadReceipt({ payment, client: member, group, ticketNo, chitDueNo });
-                                                }}
-                                              >
-                                                ↓ Receipt
-                                              </button>
+                                              {cellPayments.map((pmt, pi) => (
+                                                <div key={pmt._id} className="flex items-center justify-center gap-1.5">
+                                                  <button
+                                                    className="text-[9px] text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap leading-tight"
+                                                    title={`Receipt ${cellPayments.length > 1 ? pi + 1 : ""} — ${formatCurrency(pmt.amount)}`}
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      const ticketNo = ((group?.memberIds || []).indexOf(member._id) + 1) || "—";
+                                                      const chitDueNo = idx + 1;
+                                                      downloadReceipt({ payment: pmt, client: member, group, ticketNo, chitDueNo });
+                                                    }}
+                                                  >
+                                                    ↓ Receipt{cellPayments.length > 1 ? ` ${pi + 1}` : ""}
+                                                  </button>
+                                                  {isSuperAdmin && (
+                                                    <button
+                                                      title={`Edit payment ${pi + 1}`}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEditTargetPaymentId(pmt._id);
+                                                        setPaymentAddMode("update");
+                                                        setPaymentForm((prev) => ({
+                                                          ...prev,
+                                                          groupId: paymentForm.groupId,
+                                                          clientId: member._id,
+                                                          month: t.month,
+                                                          year: String(t.year),
+                                                          amount: String(pmt.amount),
+                                                          mode: pmt.mode || "Cash",
+                                                          transactionId: pmt.transactionId || "",
+                                                          paymentDate: pmt.paymentDate || "",
+                                                          remark: pmt.remark || "",
+                                                        }));
+                                                      }}
+                                                      className="text-[9px] text-slate-400 hover:text-amber-600 leading-tight"
+                                                    >
+                                                      <Pencil className="h-2.5 w-2.5" />
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              ))}
                                             </>
                                           )}
                                         </div>
@@ -2590,6 +3381,7 @@ function App() {
                                           >
                                             {doc.name}
                                           </a>
+                                          {isSuperAdmin && (
                                           <button
                                             title="Delete document"
                                             onClick={() => setDeleteDocConfirm({
@@ -2600,8 +3392,10 @@ function App() {
                                           >
                                             <X className="h-3 w-3 text-red-400 hover:text-red-600" />
                                           </button>
+                                          )}
                                         </div>
                                       ))}
+                                      {isSuperAdmin && (
                                       <label className="flex cursor-pointer items-center gap-1 text-xs text-blue-500 hover:underline">
                                         <Plus className="h-3 w-3" />
                                         Upload
@@ -2615,6 +3409,7 @@ function App() {
                                           }}
                                         />
                                       </label>
+                                      )}
                                     </div>
                                   ) : "—"}
                                 </TableCell>
@@ -2622,6 +3417,7 @@ function App() {
                                   {row.label}
                                 </TableCell>
                                 <TableCell className="text-right">
+                                  {canDo("reports","editSchedule") && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -2644,6 +3440,7 @@ function App() {
                                   >
                                     {row.inst ? "Edit" : "Record"}
                                   </Button>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             ))}
